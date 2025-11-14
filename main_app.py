@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import os
+import sys
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
@@ -25,10 +26,19 @@ from device_io import (
 )
 
 
+
+
+def resource_path(relative_path):
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.iconbitmap("icon.ico")
+        icon_path = resource_path("icon/icon.ico")
+        self.iconbitmap(icon_path)
         self.lang = "zh"
         self.conn_status = "disconnected"
         self.conn_port = None
