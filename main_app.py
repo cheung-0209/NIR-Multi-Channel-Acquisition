@@ -119,9 +119,9 @@ class App(tk.Tk):
         self.port_cb.grid(row=0, column=1, padx=(6, 6))
         self.lbl_baud = ttk.Label(self.conn_frame, text="波特率:")
         self.lbl_baud.grid(row=0, column=2, sticky="e")
-        baud_list = ['9600', '19200', '38400', '57600', '115200', '230400', '460800', '921600', '100000']
+        baud_list = ['9600', '19200', '38400', '57600', '115200', '230400', '460800', '921600', '1000000']
         self.baud_cb = ttk.Combobox(self.conn_frame, textvariable=self.baudrate_var, values=baud_list,
-                                    width=10, state="readonly")
+                                    width=10, state="normal")
         self.baud_cb.grid(row=0, column=3, sticky="w", padx=(6, 0))
         self.btn_apply_baud = ttk.Button(self.conn_frame, text="应用", command=self._apply_baudrate, width=6)
         self.btn_apply_baud.grid(row=0, column=4, sticky="w", padx=(6, 0))
