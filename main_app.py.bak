@@ -48,6 +48,8 @@ class App(tk.Tk):
         self.running = False
         self.recording_raw = False
         self.recording_filtered = False
+        self.record_save_raw = tk.BooleanVar(value=True)
+        self.record_save_proc = tk.BooleanVar(value=False)
         self.record_file = None
         self.record_writer = None
         self._pending_write_buffer_raw = []
@@ -134,7 +136,7 @@ class App(tk.Tk):
         self.btn_apply_baud.grid(row=0, column=4, sticky="w", padx=(6, 0))
         self.btn_refresh = ttk.Button(self.conn_frame, text="刷新", command=self._refresh_ports, width=8)
         self.btn_refresh.grid(row=0, column=5)
-        self.btn_connect = ttk.Button(self.conn_frame, text="连接", command=self._connect, width=9)
+        self.btn_connect = ttk.Button(self.conn_frame, text="连接", command=self._connect, width=6)
         self.btn_connect.grid(row=0, column=6, padx=(6, 0))
         self.lbl_conn = ttk.Label(self.conn_frame, text="", foreground="#b00020")
         self.lbl_conn.grid(row=0, column=7, sticky="w", padx=(10, 0))
@@ -144,9 +146,7 @@ class App(tk.Tk):
         self.btn_start.grid(row=0, column=9, sticky="e", ipadx=18, ipady=6, padx=(6, 0))
         self.btn_pause = ttk.Button(self.conn_frame, text="暂停", command=self._pause_acq)
         self.btn_pause.grid(row=0, column=10, sticky="e", ipadx=18, ipady=6, padx=(6, 0))
-        self.btn_lang = tk.Button(self.conn_frame, text="English", width=8, height=2, 
-                                   command=self._toggle_lang, bg="#4CAF50", fg="white", 
-                                   font=("Arial", 10, "bold"), relief=tk.RAISED, bd=2)
+        self.btn_lang = ttk.Button(self.conn_frame, text="English", width=8, command=self._toggle_lang)
         self.btn_lang.grid(row=0, column=11, sticky="e", padx=(10, 0))
         self._refresh_ports()
         self._update_conn_label()
@@ -154,29 +154,13 @@ class App(tk.Tk):
         parent.rowconfigure(0, weight=1)
         self._set_running(False)
 
-    def _build_raw_page(self, parent):
-        """原始数据页：显示原始波形，支持保存原始数据"""
+    def _build_plot_page(self, parent):
         plot_container = ttk.Frame(parent, padding=(8, 8, 8, 0))
         plot_container.grid(row=0, column=0, sticky="nsew")
-        self.six_plot_raw = SixPlotPanel(plot_container, max_time_span=3000.0)
+        self.six_plot = SixPlotPanel(plot_container, max_time_span=3000.0)
         ctrl = ttk.Frame(parent, padding=(8, 8, 8, 8))
         ctrl.grid(row=1, column=0, sticky="ew")
         
-        self.btn_record_raw = ttk.Button(ctrl, text="开始记录", command=self._toggle_record_raw)
-        self.btn_record_raw.grid(row=0, column=0, sticky="w", padx=(0, 12))
-        self.btn_clear_raw = ttk.Button(ctrl, text="清除波形", command=self._clear_plots_raw)
-        self.btn_clear_raw.grid(row=0, column=1, sticky="w", padx=(0, 12))
-
-        parent.rowconfigure(0, weight=1)
-        parent.columnconfigure(0, weight=1)
-
-    def _build_filtered_page(self, parent):
-        """滤波数据页：显示滤波后的波形，支持滤波参数设置和保存"""
-        plot_container = ttk.Frame(parent, padding=(8, 8, 8, 0))
-        plot_container.grid(row=0, column=0, sticky="nsew")
-        self.six_plot_filtered = SixPlotPanel(plot_container, max_time_span=3000.0)
-        ctrl = ttk.Frame(parent, padding=(8, 8, 8, 8))
-        ctrl.grid(row=1, column=0, sticky="ew")
         
         # 带通滤波范围选择：一个下拉框控件
         self.var_filter = tk.StringVar(value="关闭")
@@ -200,14 +184,23 @@ class App(tk.Tk):
 
         ttk.Separator(ctrl, orient="vertical").grid(row=0, column=1, rowspan=2, sticky="ns", padx=12)
 
-        # 记录按钮
-        self.btn_record_filtered = ttk.Button(ctrl, text="开始记录", command=self._toggle_record_filtered)
-        self.btn_record_filtered.grid(row=0, column=2, sticky="w", padx=(12,0))
-        self.btn_clear_filtered = ttk.Button(ctrl, text="清除波形", command=self._clear_plots_filtered)
-        self.btn_clear_filtered.grid(row=0, column=3, sticky="w", padx=(12,0))
+        # 后面“保存”“原始”“处理后”“开始记录”“清除波形”这些列号要整体往后移一个：
+        self.lbl_save = ttk.Label(ctrl, text="保存:")
+        self.lbl_save.grid(row=0, column=2, sticky="e")
+        self.record_save_raw = tk.BooleanVar(value=True)
+        self.record_save_proc = tk.BooleanVar(value=False)
+        self.cb_raw = ttk.Checkbutton(ctrl, text="原始", variable=self.record_save_raw)
+        self.cb_raw.grid(row=0, column=3, sticky="w")
+        self.cb_proc = ttk.Checkbutton(ctrl, text="处理后", variable=self.record_save_proc)
+        self.cb_proc.grid(row=0, column=4, sticky="w", padx=(6,0))
+        self.btn_record = ttk.Button(ctrl, text="开始记录", command=self._toggle_record)
+        self.btn_record.grid(row=0, column=5, sticky="w", padx=(12,0))
+        self.btn_clear = ttk.Button(ctrl, text="清除波形", command=self._clear_plots)
+        self.btn_clear.grid(row=0, column=6, sticky="w", padx=(12,0))
 
         parent.rowconfigure(0, weight=1)
         parent.columnconfigure(0, weight=1)
+        
 
     def _on_filter_changed(self):
         text = self.var_filter.get()
@@ -238,13 +231,13 @@ class App(tk.Tk):
             self.nb.tab(self.page_ctrl, text="控制")
             self.nb.tab(self.page_raw, text="原始数据")
             self.nb.tab(self.page_filtered, text="滤波数据")
-            self.btn_lang.config(text="English", bg="#4CAF50")
+            self.btn_lang.config(text="English")
         else:
             self.title("NIR Multi-Channel Acquisition")
             self.nb.tab(self.page_ctrl, text="Control")
             self.nb.tab(self.page_raw, text="Raw Data")
             self.nb.tab(self.page_filtered, text="Filtered Data")
-            self.btn_lang.config(text="中文", bg="#4CAF50")
+            self.btn_lang.config(text="中文")
         if self.lang == "zh":
             self.lbl_sf.config(text="采样频率(Hz):")
             self.btn_sf.config(text="写入")
@@ -257,10 +250,6 @@ class App(tk.Tk):
             self.btn_apply_baud.config(text="应用")
             self.btn_refresh.config(text="刷新")
             self.btn_connect.config(text="连接")
-            self.btn_record_raw.config(text="停止记录" if self.recording_raw else "开始记录")
-            self.btn_clear_raw.config(text="清除波形")
-            self.btn_record_filtered.config(text="停止记录" if self.recording_filtered else "开始记录")
-            self.btn_clear_filtered.config(text="清除波形")
         else:
             self.lbl_sf.config(text="Sampling Frequency(Hz):")
             self.btn_sf.config(text="write")
@@ -273,8 +262,18 @@ class App(tk.Tk):
             self.btn_apply_baud.config(text="Apply")
             self.btn_refresh.config(text="Refresh")
             self.btn_connect.config(text="Connect")
-            self.btn_record_raw.config(text="Stop" if self.recording_raw else "Record")
-            self.btn_clear_raw.config(text="Clear plots")
+        if self.lang == "zh":
+            if self.var_filter.get() not in ["关闭",
+                                            "0.5Hz~5Hz","0.5Hz~6Hz",
+                                            "0.5Hz~7Hz","0.5Hz~8Hz",
+                                            "0.5Hz~9Hz","0.5Hz~10Hz"]:
+                self.var_filter.set("关闭")
+            self.lbl_save.config(text="保存:")
+            self.cb_raw.config(text="原始")
+            self.cb_proc.config(text="处理后")
+            self.btn_record.config(text="停止记录" if self.recording else "开始记录")
+            self.btn_clear.config(text="清除波形")
+        else:
             self.cb_filter["values"] = [
                 "Off",
                 "0.5Hz~5Hz",
@@ -289,8 +288,11 @@ class App(tk.Tk):
                                             "0.5Hz~7Hz","0.5Hz~8Hz",
                                             "0.5Hz~9Hz","0.5Hz~10Hz"]:
                 self.var_filter.set("Off")
-            self.btn_record_filtered.config(text="Stop" if self.recording_filtered else "Record")
-            self.btn_clear_filtered.config(text="Clear plots")
+            self.lbl_save.config(text="Save:")
+            self.cb_raw.config(text="Raw")
+            self.cb_proc.config(text="Processed")
+            self.btn_record.config(text="Stop" if self.recording else "Record")
+            self.btn_clear.config(text="Clear plots")
         for card in self.cards:
             card.set_language(self.lang)
         self._update_conn_label()
@@ -354,7 +356,7 @@ class App(tk.Tk):
         port = self.port_cb.get()
         if not port:
             if self.lang == "zh":
-                messagebox.showinfo("提示", '请先在"控制"页选择串口端口。')
+                messagebox.showinfo("提示", "请先在“控制”页选择串口端口。")
             else:
                 messagebox.showinfo("Info", "Please select a serial port on the 'Control' tab first.")
             return
@@ -423,15 +425,8 @@ class App(tk.Tk):
             self._set_running(False)
             device_set_power(False)
 
-    def _clear_plots_raw(self):
-        self.six_plot_raw.clear_all()
-        reset_time_zero()
-        global _frame_index
-        _frame_index = 0
-        clear_plot_queue()
-
-    def _clear_plots_filtered(self):
-        self.six_plot_filtered.clear_all()
+    def _clear_plots(self):
+        self.six_plot.clear_all()
         reset_filter_states()
         reset_time_zero()
         global _frame_index
@@ -459,176 +454,110 @@ class App(tk.Tk):
         self._close_session()
         self.destroy()
 
-    def _toggle_record_raw(self):
-        """原始数据页的记录按钮"""
-        if not self.recording_raw:
-            # 开始记录：清空缓存
-            self._pending_write_buffer_raw.clear()
-            self.recording_raw = True
-            self._apply_language()
-        else:
-            # 结束记录并触发保存
-            self._stop_record_raw_if_needed()
-            self._apply_language()
-
-    def _toggle_record_filtered(self):
-        """滤波数据页的记录按钮"""
-        if not self.recording_filtered:
-            # 开始记录：清空缓存
-            self._pending_write_buffer_filtered.clear()
-            self.recording_filtered = True
-            self._apply_language()
-        else:
-            # 结束记录并触发保存
-            self._stop_record_filtered_if_needed()
-            self._apply_language()
-
-    def _stop_record_raw_if_needed(self):
-        if not self.recording_raw:
-            return
-
-        try:
-            if not self._pending_write_buffer_raw:
-                self.recording_raw = False
-                return
-
-            default_name = f"nir6_raw_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            path = filedialog.asksaveasfilename(
-                title="保存原始数据" if self.lang == "zh" else "Save raw data",
-                defaultextension=".xlsx",
-                initialfile=default_name,
-                filetypes=(
-                    [("Excel 文件", "*.xlsx"),
-                     ("CSV 文件", "*.csv"),
-                     ("文本文件", "*.txt"),
-                     ("所有文件", "*.*")]
-                    if self.lang == "zh"
-                    else [("Excel file", "*.xlsx"),
-                          ("CSV file", "*.csv"),
-                          ("Text file", "*.txt"),
-                          ("All files", "*.*")]
-                )
-            )
-
-            if not path:
-                self.recording_raw = False
-                self._pending_write_buffer_raw.clear()
-                return
-
-            ext = os.path.splitext(path)[1].lower()
-            header = ["time_ms", "channel", "value"]
-
-            if ext == ".xlsx":
-                try:
-                    from openpyxl import Workbook
-                except ImportError:
-                    if self.lang == "zh":
-                        messagebox.showerror(
-                            "错误",
-                            "缺少 openpyxl 库，无法保存为 Excel 文件。\n请先执行：pip install openpyxl"
-                        )
-                    else:
-                        messagebox.showerror(
-                            "Error",
-                            "openpyxl is not installed, cannot save as Excel.\nPlease run: pip install openpyxl"
-                        )
+    def _toggle_record(self):
+        if not self.recording:
+            if not (self.record_save_raw.get() or self.record_save_proc.get()):
+                if self.lang == "zh":
+                    messagebox.showinfo("提示", "请至少勾选“原始”或“处理后”之一再开始记录。")
                 else:
-                    wb = Workbook()
-                    ws = wb.active
-                    ws.append(header)
-                    for row in self._pending_write_buffer_raw:
-                        ws.append(row)
-                    wb.save(path)
-            else:
-                with open(path, "w", newline="", encoding="utf-8-sig") as f:
-                    w = csv.writer(f)
-                    w.writerow(header)
-                    w.writerows(self._pending_write_buffer_raw)
-
-        except Exception as e:
-            if self.lang == "zh":
-                messagebox.showerror("错误", f"保存原始数据失败：{e}")
-            else:
-                messagebox.showerror("Error", f"Failed to save raw data: {e}")
-        finally:
-            self.recording_raw = False
-            self._pending_write_buffer_raw.clear()
-
-    def _stop_record_filtered_if_needed(self):
-        if not self.recording_filtered:
-            return
-
-        try:
-            if not self._pending_write_buffer_filtered:
-                self.recording_filtered = False
+                    messagebox.showinfo("Info", "Please select at least one of 'Raw' or 'Processed' before recording.")
                 return
 
-            default_name = f"nir6_filtered_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            path = filedialog.asksaveasfilename(
-                title="保存滤波数据" if self.lang == "zh" else "Save filtered data",
-                defaultextension=".xlsx",
-                initialfile=default_name,
-                filetypes=(
-                    [("Excel 文件", "*.xlsx"),
-                     ("CSV 文件", "*.csv"),
-                     ("文本文件", "*.txt"),
-                     ("所有文件", "*.*")]
-                    if self.lang == "zh"
-                    else [("Excel file", "*.xlsx"),
-                          ("CSV file", "*.csv"),
-                          ("Text file", "*.txt"),
-                          ("All files", "*.*")]
-                )
-            )
+            # 开始记录：清空缓存，默认预期保存成 xlsx
+            self._pending_write_buffer.clear()
+            self.record_path = None
+            self.record_format = "xlsx"
+            self.record_file = None
+            self.record_writer = None
 
-            if not path:
-                self.recording_filtered = False
-                self._pending_write_buffer_filtered.clear()
-                return
-
-            ext = os.path.splitext(path)[1].lower()
-            header = ["time_ms", "channel", "value"]
-
-            if ext == ".xlsx":
-                try:
-                    from openpyxl import Workbook
-                except ImportError:
-                    if self.lang == "zh":
-                        messagebox.showerror(
-                            "错误",
-                            "缺少 openpyxl 库，无法保存为 Excel 文件。\n请先执行：pip install openpyxl"
-                        )
-                    else:
-                        messagebox.showerror(
-                            "Error",
-                            "openpyxl is not installed, cannot save as Excel.\nPlease run: pip install openpyxl"
-                        )
-                else:
-                    wb = Workbook()
-                    ws = wb.active
-                    ws.append(header)
-                    for row in self._pending_write_buffer_filtered:
-                        ws.append(row)
-                    wb.save(path)
-            else:
-                with open(path, "w", newline="", encoding="utf-8-sig") as f:
-                    w = csv.writer(f)
-                    w.writerow(header)
-                    w.writerows(self._pending_write_buffer_filtered)
-
-        except Exception as e:
-            if self.lang == "zh":
-                messagebox.showerror("错误", f"保存滤波数据失败：{e}")
-            else:
-                messagebox.showerror("Error", f"Failed to save filtered data: {e}")
-        finally:
-            self.recording_filtered = False
-            self._pending_write_buffer_filtered.clear()
+            self.recording = True
+            self._apply_language()  # 更新按钮文字为“停止记录”/“Stop”
+        else:
+            # 当前已经在记录 → 点击 = 结束记录并触发保存
+            self._stop_record_if_needed()
+            self._apply_language()
 
     def _stop_record_if_needed(self):
-        """用于兼容 _close_session 的调用"""
-        self._stop_record_raw_if_needed()
-        self._stop_record_filtered_if_needed()
+        if not self.recording:
+            return
+
+        try:
+            # 没有任何数据就直接结束，不弹保存框
+            if not self._pending_write_buffer:
+                self.recording = False
+                self.record_path = None
+                return
+
+            default_name = f"nir6_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            path = filedialog.asksaveasfilename(
+                title="保存数据" if self.lang == "zh" else "Save data",
+                defaultextension=".xlsx",
+                initialfile=default_name,
+                filetypes=(
+                    [("Excel 文件", "*.xlsx"),
+                     ("CSV 文件", "*.csv"),
+                     ("文本文件", "*.txt"),
+                     ("所有文件", "*.*")]
+                    if self.lang == "zh"
+                    else [("Excel file", "*.xlsx"),
+                          ("CSV file", "*.csv"),
+                          ("Text file", "*.txt"),
+                          ("All files", "*.*")]
+                )
+            )
+
+            # 用户取消保存，也视为正常结束记录，只是不落盘
+            if not path:
+                self.recording = False
+                self.record_path = None
+                self._pending_write_buffer.clear()
+                return
+
+            self.record_path = path
+            ext = os.path.splitext(path)[1].lower()
+            header = ["time_ms", "channel", "value", "kind"]
+
+            if ext == ".xlsx":
+                try:
+                    from openpyxl import Workbook
+                except ImportError:
+                    if self.lang == "zh":
+                        messagebox.showerror(
+                            "错误",
+                            "缺少 openpyxl 库，无法保存为 Excel 文件。\n请先执行：pip install openpyxl"
+                        )
+                    else:
+                        messagebox.showerror(
+                            "Error",
+                            "openpyxl is not installed, cannot save as Excel.\nPlease run: pip install openpyxl"
+                        )
+                else:
+                    wb = Workbook()
+                    ws = wb.active
+                    ws.append(header)
+                    for row in self._pending_write_buffer:
+                        ws.append(row)
+                    wb.save(path)
+            else:
+                import csv
+                with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                    w = csv.writer(f)
+                    w.writerow(header)
+                    w.writerows(self._pending_write_buffer)
+
+        except Exception as e:
+            if self.lang == "zh":
+                messagebox.showerror("错误", f"保存记录失败：{e}")
+            else:
+                messagebox.showerror("Error", f"Failed to save data: {e}")
+        finally:
+            # 无论是否成功保存，都要把状态复位
+            self.record_file = None
+            self.record_writer = None
+            self.recording = False
+            self.record_path = None
+            self._pending_write_buffer.clear()
+            self.record_format = "xlsx"
 
     def _schedule_plot_drain(self, interval_ms: int = 33):
         self.after(interval_ms, self._drain_plot_queue)
@@ -636,24 +565,24 @@ class App(tk.Tk):
     def _drain_plot_queue(self):
         raw_samples = fetch_raw_samples(12000)
         if raw_samples:
-            # 原始数据显示
-            self.six_plot_raw.add_points_bulk(raw_samples)
-            self.six_plot_raw.update_all()
-
-            # 滤波后数据显示
             proc_samples = apply_filters_to_samples(raw_samples)
-            self.six_plot_filtered.add_points_bulk(proc_samples)
-            self.six_plot_filtered.update_all()
+            self.six_plot.add_points_bulk(proc_samples)
+            self.six_plot.update_all()
 
-            # 原始数据记录
-            if self.recording_raw:
-                for ch, t, v in raw_samples:
-                    self._pending_write_buffer_raw.append([f"{t:.3f}", ch, f"{v:.6f}"])
+            if self.recording:
+                rows_to_add = []
 
-            # 滤波数据记录
-            if self.recording_filtered:
-                for ch, t, v in proc_samples:
-                    self._pending_write_buffer_filtered.append([f"{t:.3f}", ch, f"{v:.6f}"])
+                if self.record_save_raw.get():
+                    for ch, t, v in raw_samples:
+                        rows_to_add.append([f"{t:.3f}", ch, f"{v:.6f}", "raw"])
+
+                if self.record_save_proc.get():
+                    for ch, t, v in proc_samples:
+                        rows_to_add.append([f"{t:.3f}", ch, f"{v:.6f}", "processed"])
+
+                if rows_to_add:
+                    # 录制期间统一往内存缓存里塞，不管最终要存成什么格式
+                    self._pending_write_buffer.extend(rows_to_add)
 
         # 不管这一轮有没有数据，最后都要安排下一次刷新
         self._schedule_plot_drain()
