@@ -13,37 +13,52 @@ _connected: bool = False
 
 _plot_q: "Queue[Tuple[str, float, float]]" = Queue(maxsize=200_000)
 _t0: Optional[float] = None
+#新加参数
+_current_fs_hz: float = 100.0          # 当前采样率
+_dt_ms: float = 1000.0 / _current_fs_hz  # 每一帧对应的时间间隔
+_frame_index: int = 0                  # 当前是第几帧
 
 _RX_NM = re.compile(r'\b(470|520|600|630|850|940)nm\s+0x([0-9a-fA-F]{1,64})\b', re.IGNORECASE)
-_RX_LN = re.compile(r'\bL([1-6])\s+0x([0-9a-fA-F]{1,64})\b', re.IGNORECASE)
+_RX_LN = re.compile(r'\bL([1-6])\s+0x([0-9a-fA-F]{8})\b', re.IGNORECASE)
 
-_filter_enabled = False
-_baseline_enabled = False
-_filter_window = 5
-_baseline_alpha = 0.01
-_baseline_state: Dict[str, Optional[float]] = {ch: None for ch in CHANNELS}
-_recent_buffers: Dict[str, List[float]] = {ch: [] for ch in CHANNELS}
+from scipy import signal
 
+# ====== 二阶 Butterworth 带通滤波配置（按 nm 建立状态）======
+_filter_enabled = False           # 是否启用带通滤波
+_bp_low = 0.5                     # 固定下截止 0.5 Hz
+_bp_high = 5.0                    # 上截止初始 5 Hz，可由 UI 改成 6~10 Hz
+_fs_hz: float = 10000.0           # 当前采样频率，默认 10 kHz
+_bp_b = None                      # 滤波器分子系数
+_bp_a = None                      # 滤波器分母系数
+_bp_zi: Dict[str, Optional[List[float]]] = {ch: None for ch in CHANNELS}  # 每个通道的滤波状态（zi）
 
-def set_filter_options(enabled: bool | None = None,
-                       baseline: bool | None = None,
-                       window: int | None = None,
-                       alpha: float | None = None):
-    global _filter_enabled, _baseline_enabled, _filter_window, _baseline_alpha
+def _recalc_bandpass():
+    global _bp_b, _bp_a, _bp_zi
+    nyq = 0.5 * _fs_hz
+    low = _bp_low / nyq
+    high = _bp_high / nyq
+    if high >= 1.0:
+        high = 0.999
+    if low <= 0.0:
+        low = 1e-6
+    if low >= high:
+        low = high * 0.5
+    _bp_b, _bp_a = signal.butter(2, [low, high], btype="bandpass")
+    _bp_zi = {ch: None for ch in CHANNELS}
+
+def set_bandpass_filter_options(enabled: bool | None = None,
+                                high_cut_hz: float | None = None):
+    global _filter_enabled, _bp_high
     if enabled is not None:
         _filter_enabled = bool(enabled)
-    if baseline is not None:
-        _baseline_enabled = bool(baseline)
-    if window is not None and window > 1:
-        _filter_window = int(window)
-    if alpha is not None and 0.0 < alpha < 1.0:
-        _baseline_alpha = float(alpha)
-
+    if high_cut_hz is not None:
+        _bp_high = float(high_cut_hz)
+    if _filter_enabled:
+        _recalc_bandpass()
 
 def reset_filter_states():
-    global _baseline_state, _recent_buffers
-    _baseline_state = {ch: None for ch in CHANNELS}
-    _recent_buffers = {ch: [] for ch in CHANNELS}
+    global _bp_zi
+    _bp_zi = {ch: None for ch in CHANNELS}
 
 
 def reset_time_zero():
@@ -60,17 +75,16 @@ def clear_plot_queue():
 
 
 def _on_serial_line(line_bytes: bytes):
-    global _t0
+    global _frame_index, _dt_ms
     try:
         s = line_bytes.decode("utf-8", errors="replace")
     except Exception:
         return
     if not s:
         return
-    cur = time.monotonic()
-    if _t0 is None:
-        _t0 = cur
-    now_ms = (cur - _t0) * 1000.0
+
+    now_ms = _frame_index * _dt_ms   
+    _frame_index += 1
     consumed = s
     nm_matches = list(_RX_NM.finditer(s))
     if nm_matches:
@@ -149,27 +163,39 @@ def fetch_raw_samples(max_items: int = 12000) -> List[Tuple[str, float, float]]:
     return out
 
 
-def apply_filters_to_samples(samples: List[Tuple[str, float, float]]) -> List[Tuple[str, float, float]]:
-    if not samples:
-        return []
-    processed: List[Tuple[str, float, float]] = []
+def apply_filters_to_samples(samples: List[Tuple[str, float, float]]
+                             ) -> List[Tuple[str, float, float]]:
+    if not samples or not _filter_enabled or _bp_b is None or _bp_a is None:
+        return samples
+
+    buckets: Dict[str, List[float]] = {ch: [] for ch in CHANNELS}
     for ch, t, v in samples:
-        vv = v
-        if _filter_enabled:
-            buf = _recent_buffers[ch]
-            buf.append(vv)
-            if len(buf) > _filter_window:
-                buf.pop(0)
-            vv = sum(buf) / len(buf)
-        if _baseline_enabled:
-            base = _baseline_state.get(ch)
-            if base is None:
-                base = vv
-            base = _baseline_alpha * vv + (1 - _baseline_alpha) * base
-            _baseline_state[ch] = base
-            vv = vv - base
-        processed.append((ch, t, vv))
-    return processed
+        if ch in buckets:
+            buckets[ch].append(v)
+
+    filtered: Dict[str, List[float]] = {}
+    for ch, xs in buckets.items():
+        if not xs:
+            continue
+        xs_arr = xs
+        zi = _bp_zi.get(ch)
+        if zi is None:
+            zi = list(signal.lfilter_zi(_bp_b, _bp_a) * xs_arr[0])
+        y, zf = signal.lfilter(_bp_b, _bp_a, xs_arr, zi=zi)
+        _bp_zi[ch] = list(zf)
+        filtered[ch] = list(y)
+
+    idx: Dict[str, int] = {ch: 0 for ch in CHANNELS}
+    out: List[Tuple[str, float, float]] = []
+    for ch, t, _v in samples:
+        if ch in filtered:
+            k = idx[ch]
+            out.append((ch, t, filtered[ch][k]))
+            idx[ch] = k + 1
+        else:
+            out.append((ch, t, _v))
+    return out
+
 
 
 def get_plot_samples(max_items: int = 8000) -> List[Tuple[str, float, float]]:
@@ -236,6 +262,7 @@ def device_write_tia_gain(ch_ui: str, code: int) -> bool:
 
 
 def device_write_fs(hz: int) -> bool:
+    global _fs_hz
     try:
         fs = int(hz)
         fs = max(1, fs)
@@ -245,7 +272,13 @@ def device_write_fs(hz: int) -> bool:
     if reg > 0xFFFF:
         return False
     ok, _ = _send_cmd(f"S,FS,{_hex4(reg)}")
+    if ok:
+        _fs_hz = float(fs)
+        if _filter_enabled:
+            _recalc_bandpass()
     return ok
+
+
 
 
 def device_set_power(on: bool) -> bool:

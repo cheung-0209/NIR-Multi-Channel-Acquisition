@@ -7,6 +7,11 @@ from typing import Dict, Deque, Iterable, Tuple, Optional
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.ticker import FuncFormatter, AutoMinorLocator
+import matplotlib
+matplotlib.rcParams["font.family"] = "Arial"
+import math
+
+
 
 from constants import CHANNELS
 
@@ -14,11 +19,11 @@ from constants import CHANNELS
 class _Theme:
     channel_colors = {
         "470nm": "#2563eb",
-        "520nm": "#f97316",
-        "600nm": "#16a34a",
+        "520nm": "#16a34a",
+        "600nm": "#f97316",
         "630nm": "#dc2626",
-        "850nm": "#7c3aed",
-        "940nm": "#0891b2",
+        "850nm": "#523414",
+        "940nm": "#373333",
     }
     fig_face = "#FFFFFF"
     ax_face = "#FFFFFF"
@@ -36,11 +41,15 @@ class _Theme:
     right_margin_frac = 0.02
 
 
-def _thousands(x: float, _pos=None):
-    s = f"{x:,.2f}"
-    if s.endswith(".00"):
-        s = s[:-3]
-    return s
+def _sci_fmt(x: float, _pos=None):
+    if x == 0:
+        return "0"
+    sign = -1 if x < 0 else 1
+    x_abs = abs(x)
+    p = int(math.floor(math.log10(x_abs)))
+    m = sign * x_abs / (10 ** p)
+    return rf"${m:.1f}×10^{{{p}}}$"
+
 
 
 def _seconds_fmt(x: float, _pos=None):
@@ -62,11 +71,10 @@ class _SinglePlot:
         color = _Theme.channel_colors.get(channel_key, "#374151")
         self.fig = Figure(figsize=(4.1, 2.35), dpi=110, constrained_layout=True, facecolor=_Theme.fig_face)
         self.ax = self.fig.add_subplot(111, facecolor=_Theme.ax_face)
-        self.ax.set_title(title, fontsize=_Theme.title_size, weight="bold", fontfamily="Times New Roman",
-                          color="#111827", pad=6)
-        self.ax.set_xlabel("Time (×10^3 ms)", fontfamily="Times New Roman", weight="light",
-                           fontsize=_Theme.label_size)
-        self.ax.set_ylabel("Value", fontfamily="Times New Roman", weight="light", fontsize=_Theme.label_size)
+        self.ax.set_title(title, fontsize=_Theme.title_size, weight="bold", fontfamily="Arial", color="#111827", pad=6)
+        self.ax.set_xlabel("Time (s)", fontfamily="Arial", weight="light", fontsize=_Theme.label_size)
+        self.ax.set_ylabel("Value", fontfamily="Arial", weight="light", fontsize=_Theme.label_size)
+
         for side in ("top", "right", "bottom", "left"):
             spine = self.ax.spines[side]
             spine.set_visible(True)
@@ -74,7 +82,7 @@ class _SinglePlot:
             spine.set_color("#5C5C5C")
         self.ax.tick_params(axis="both", labelsize=_Theme.tick_size, length=3.5, width=0.8, colors="#171717")
         self.ax.xaxis.set_major_formatter(FuncFormatter(_ms_fmt))
-        self.ax.yaxis.set_major_formatter(FuncFormatter(_thousands))
+        self.ax.yaxis.set_major_formatter(FuncFormatter(_sci_fmt))
         self.ax.xaxis.set_minor_locator(AutoMinorLocator(2))
         self.ax.yaxis.set_minor_locator(AutoMinorLocator(2))
         self.ax.grid(True, which="major", linewidth=_Theme.grid_major_lw, alpha=_Theme.grid_major_alpha)

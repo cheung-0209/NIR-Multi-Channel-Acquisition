@@ -3,7 +3,14 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from constants import tia_gain_to_kohm, current_code_to_ma
+from constants import (
+    tia_gain_to_kohm,
+    current_code_to_ma,
+    tia_hex_to_label,
+    tia_label_to_hex,
+    TIA_LABEL_TO_HEX,
+)
+
 from device_io import device_write_tia_gain, device_write_current, device_write_led_pulse, _hex4
 
 
@@ -15,20 +22,25 @@ class ChannelCard(tk.Frame):
         self.lbl_title = ttk.Label(self, text=title, font=("", 11, "bold"))
         self.lbl_title.grid(row=0, column=0, columnspan=5, sticky="w", pady=(0, 6))
         vcmd = (self.register(self._validate_int), "%P")
-        self.tia_var = tk.IntVar(value=int(tia_default))
+        self.tia_var = tk.StringVar(value=tia_hex_to_label(int(tia_default)))
         self.lbl_tia = ttk.Label(self, text="TIA 增益 (Ω):")
         self.lbl_tia.grid(row=1, column=0, sticky="w")
-        self.tia_sp = tk.Spinbox(self, from_=0, to=65535, increment=1, width=8,
-                                 textvariable=self.tia_var, validate="key",
-                                 validatecommand=vcmd, command=self._refresh_tia)
-        self.tia_sp.grid(row=1, column=1, padx=(8, 8))
+        self.tia_cb = ttk.Combobox(
+            self,
+            width=8,
+            state="readonly",
+            textvariable=self.tia_var,
+            values=list(TIA_LABEL_TO_HEX.keys()),
+        )
+        self.tia_cb.grid(row=1, column=1, padx=(8, 8))
         self.btn_tia = ttk.Button(self, text="写入", width=8, command=self._write_tia)
         self.btn_tia.grid(row=1, column=2)
-        ttk.Label(self, text="≈", foreground="#000000").grid(row=1, column=3, padx=(10, 4))
+        ttk.Label(self, text="=", foreground="#000000").grid(row=1, column=3, padx=(10, 4))
         self.tia_val_top = ttk.Label(self, width=8, anchor="e")
         self.tia_val_unit = ttk.Label(self, text="kΩ", foreground="#000000")
         self.tia_val_top.grid(row=1, column=4, sticky="e")
         self.tia_val_unit.grid(row=1, column=5, sticky="w")
+
         self.cur_var = tk.IntVar(value=int(cur_default))
         self.lbl_cur = ttk.Label(self, text="电流 (mA):")
         self.lbl_cur.grid(row=2, column=0, sticky="w", pady=(8, 0))
@@ -38,7 +50,7 @@ class ChannelCard(tk.Frame):
         self.cur_sp.grid(row=2, column=1, padx=(8, 8), pady=(8, 0))
         self.btn_cur = ttk.Button(self, text="写入", width=8, command=self._write_cur)
         self.btn_cur.grid(row=2, column=2, pady=(8, 0))
-        ttk.Label(self, text="≈", foreground="#000000").grid(row=2, column=3, padx=(10, 4), pady=(8, 0))
+        ttk.Label(self, text="=", foreground="#000000").grid(row=2, column=3, padx=(10, 4), pady=(8, 0))
         self.cur_val_top = ttk.Label(self, width=8, anchor="e")
         self.cur_val_unit = ttk.Label(self, text="mA", foreground="#000000")
         self.cur_val_top.grid(row=2, column=4, sticky="e", pady=(8, 0))
@@ -46,11 +58,11 @@ class ChannelCard(tk.Frame):
         self.pulse_var = tk.IntVar(value=int(pulse_default))
         self.lbl_pulse = ttk.Label(self, text="脉冲个数:")
         self.lbl_pulse.grid(row=3, column=0, sticky="w", pady=(6, 0))
-        self.pulse_sp = tk.Spinbox(self, from_=1, to=255, increment=1, width=6,
+        self.pulse_sp = tk.Spinbox(self, from_=1, to=255, increment=1, width=8,
                                    textvariable=self.pulse_var, validate="key",
                                    validatecommand=vcmd, command=self._refresh_pulse)
         self.pulse_sp.grid(row=3, column=1, padx=(6, 6), pady=(6, 0))
-        self.btn_pulse = ttk.Button(self, text="写入", width=6, command=self._write_pulse)
+        self.btn_pulse = ttk.Button(self, text="写入", width=8, command=self._write_pulse)
         self.btn_pulse.grid(row=3, column=2, pady=(6, 0))
         self._add_filler(col=3, row=3)
         self.pulse_hex_top = ttk.Label(self, width=8, anchor="center")
@@ -62,12 +74,7 @@ class ChannelCard(tk.Frame):
         self.columnconfigure(3, weight=1)
         self.columnconfigure(4, weight=0)
         self.grid_propagate(True)
-        self.tia_sp.bind("<FocusOut>", lambda e: self._refresh_tia())
-        self.tia_sp.bind("<Return>", lambda e: self._refresh_tia())
-        self.cur_sp.bind("<FocusOut>", lambda e: self._refresh_cur())
-        self.cur_sp.bind("<Return>", lambda e: self._refresh_cur())
-        self.pulse_sp.bind("<FocusOut>", lambda e: self._refresh_pulse())
-        self.pulse_sp.bind("<Return>", lambda e: self._refresh_pulse())
+
         self.tia_var.trace_add("write", lambda *a: self._refresh_tia())
         self.cur_var.trace_add("write", lambda *a: self._refresh_cur())
         self.pulse_var.trace_add("write", lambda *a: self._refresh_pulse())
@@ -111,11 +118,9 @@ class ChannelCard(tk.Frame):
         btn.after(800, lambda: btn.config(text=old))
 
     def _refresh_tia(self):
-        try:
-            v = int(self.tia_var.get())
-        except Exception:
-            v = 0
-        self.tia_val_top.config(text=f"{tia_gain_to_kohm(v):g}")
+        label = self.tia_var.get()
+        code = tia_label_to_hex(label)
+        self.tia_val_top.config(text=f"{tia_gain_to_kohm(code):g}")
 
     def _refresh_cur(self):
         try:
@@ -135,8 +140,9 @@ class ChannelCard(tk.Frame):
         self.pulse_hex_top.config(text=f"{_hex4(payload)}")
 
     def _write_tia(self):
-        v = int(self.tia_var.get() if str(self.tia_var.get()) != "" else 0)
-        ok = device_write_tia_gain(self.channel_name, v)
+        label = self.tia_var.get()
+        code = tia_label_to_hex(label)
+        ok = device_write_tia_gain(self.channel_name, code)
         self._refresh_tia()
         if ok:
             self._blink_ok(self.btn_tia)
@@ -156,7 +162,7 @@ class ChannelCard(tk.Frame):
             self._blink_ok(self.btn_pulse)
 
     def set_values(self, tia_code, cur_code, pulse_code=None):
-        self.tia_var.set(int(tia_code))
+        self.tia_var.set(tia_hex_to_label(int(tia_code)))
         self.cur_var.set(int(cur_code))
         if pulse_code is not None:
             if pulse_code > 255:
