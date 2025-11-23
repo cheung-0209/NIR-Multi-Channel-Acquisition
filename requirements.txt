@@ -1,3 +1,7 @@
-matplotlib>=3.5.0
-openpyxl>=3.9.0
-pyserial>=3.5
+matplotlib>=3.5.0          
+tkinter                    
+
+pyserial>=3.5              
+
+openpyxl>=3.9.0            
+
